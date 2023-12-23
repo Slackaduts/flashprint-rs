@@ -26,6 +26,10 @@ const UNKNOWN1: (u16, u8) = (650, 39);
 
 const UNKNOWN2: (u16, u8) = (26, 23);
 
+
+const START_BYTES: [u8; 2] = [0x7e, 0x4d];
+const END_BYTES: [u8; 2] = [0x0d, 0x0a];
+
 #[derive(Clone, Copy)]
 enum PrinterCommand {
     MachineStatus,
@@ -58,11 +62,6 @@ impl PrinterCommand {
             PrinterCommand::Unknown1 => UNKNOWN1,
             PrinterCommand::Unknown2 => UNKNOWN2,
         }
-    }
-
-    fn cmd_str(&self) -> String {
-        let (a, _) = self.values();
-        return a.to_string();
     }
 
     fn get_cmd_bytes(&self, extra_bytes: Option<Vec<u8>>) -> Vec<u8> {
@@ -125,6 +124,22 @@ impl PrinterCommand {
                 Err(e.into())
             }
         }
+    }
+
+    fn build_cmd(&self, cmd_data: Option<String>) -> String {
+        let mut cmd_str = START_BYTES.to_ascii_lowercase();
+
+        match cmd_data {
+            Some(v) => {
+                cmd_str.push_str(&v);
+            }
+            None => {}
+        }
+
+        
+
+
+        return cmd_str;
     }
 }
 
