@@ -39,7 +39,7 @@ impl fmt::Display for PrinterCommand {
 impl PrinterCommand {
     fn build(&self, cmd_data: Option<String>) -> Vec<u8> {
         let mut cmd_bytes = START_BYTES.to_vec();
- 
+
         cmd_bytes.extend_from_slice(&self.to_string().as_bytes()); //Convert M command number to string, then bytes, then add it to the command
 
         match cmd_data {
