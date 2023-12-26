@@ -1,196 +1,169 @@
 use std::net::TcpStream;
 use std::io::{ Write, Read };
-use std::vec;
-use anyhow::Result;
-// use dialog::FileSelection;
-// use users::get_current_username;
-
-
-
-const OPEN_FILE: (u16, u8) = (23, 78);
-const PRINT_RESUME: (u16, u8) = (24, 23);
-const PRINT_PAUSE: (u16, u8) = (25, 23);
-const PRINT_STATUS: (u16, u8) = (27, 59);
-const SEND_FILE: (u16, u8) = (28, 255);
-const SAVE_FILE: (u16, u8) = (29, 42);
-
-const MACHINE_TEMPS: (u16, u8) = (105, 59);
-const POSITION_INFO: (u16, u8) = (114, 61);
-const MACHINE_INFO: (u16, u8) = (115, 207);
-const MACHINE_STATUS: (u16, u8) = (119, 152);
-
-
-const GAIN_CONTROL: (u16, u8) = (601, 47);
-const RELEASE_CONTROL: (u16, u8) = (602, 42);
-const UNKNOWN1: (u16, u8) = (650, 39);
-
-const UNKNOWN2: (u16, u8) = (26, 23);
-
+use std::{ vec, fmt };
+use num_derive::FromPrimitive;
+use num_traits::FromPrimitive;
 
 const START_BYTES: [u8; 2] = [0x7e, 0x4d];
 const END_BYTES: [u8; 2] = [0x0d, 0x0a];
 
-#[derive(Clone, Copy)]
+// #[derive(Clone, Copy, Display, Debug)]
+#[derive(Clone, Copy, Debug, FromPrimitive)]
+#[repr(u16)]
 enum PrinterCommand {
-    MachineStatus,
-    MachineTemps,
-    PrintResume,
-    PrintPause,
-    PrintStatus,
-    SendFile,
-    SaveFile,
-    OpenFile,
-    GainControl,
-    ReleaseControl,
-    Unknown1,
-    Unknown2,
+    MachineStatus = 119,
+    MachineTemps = 105,
+    PrintResume = 24,
+    PrintPause = 25,
+    PrintStatus= 27,
+    SendFile = 28,
+    SaveFile = 29,
+    OpenFile = 23,
+    GainControl = 601,
+    ReleaseControl = 602,
+    Unknown1 = 650,
+    Unknown2 = 26,
 }
 
+
+impl fmt::Display for PrinterCommand {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match PrinterCommand::from_u16(*self as u16) {
+            Some(command) => write!(f, "{}", command as u16),
+            None => write!(f, "Unknown command"),
+        }
+    }
+}
+
+
 impl PrinterCommand {
-    fn values(&self) -> (u16, u8) {
-        match self {
-            PrinterCommand::MachineStatus => MACHINE_STATUS,
-            PrinterCommand::MachineTemps => MACHINE_TEMPS,
-            PrinterCommand::PrintResume => PRINT_RESUME,
-            PrinterCommand::PrintPause => PRINT_PAUSE,
-            PrinterCommand::PrintStatus => PRINT_STATUS,
-            PrinterCommand::SendFile => SEND_FILE,
-            PrinterCommand::SaveFile => SAVE_FILE,
-            PrinterCommand::OpenFile => OPEN_FILE,
-            PrinterCommand::GainControl => GAIN_CONTROL,
-            PrinterCommand::ReleaseControl => RELEASE_CONTROL,
-            PrinterCommand::Unknown1 => UNKNOWN1,
-            PrinterCommand::Unknown2 => UNKNOWN2,
-        }
-    }
-
-    fn get_cmd_bytes(&self, extra_bytes: Option<Vec<u8>>) -> Vec<u8> {
-        let start_bytes: [u8; 2] = [0x7e, 0x4d];
-        let end_bytes: &[u8; 2] = &[0x0d, 0x0a];
-
-        let cmd_str = self.cmd_str();
-        let cmd_bytes: Vec<u8> = cmd_str.as_bytes().to_vec();
-
-        let mut bytes = start_bytes.to_vec();
-        bytes.extend_from_slice(&cmd_bytes);
-        
-
-        match extra_bytes {
-            Some(v) => {
-                bytes.extend_from_slice(&v);
-            }
-            None => {}
-        }
-
-        bytes.extend_from_slice(end_bytes);
-
-        //Print bytes as utf8
-        match std::str::from_utf8(&bytes) {
-            Ok(v) => println!("Bytes as utf8: {}", v),
-            Err(e) => println!("Invalid UTF-8 sequence: {}", e),
-        }
+    //impl Display for PrinterCommand
     
-        return bytes;
-    }
+    fn build(&self, cmd_data: Option<String>) -> Vec<u8> {
+        let mut cmd_bytes = START_BYTES.to_vec();
 
-    fn send_cmd(&self, stream: &mut TcpStream, extra_bytes: Option<Vec<u8>>) -> Result<String> {
-        let bytes = self.get_cmd_bytes(extra_bytes);
-        let result = stream.write(&bytes);
-
-        match result {
-            Ok(_) => {}
-            Err(e) => {
-                println!("Failed to send command: {}", e);
-                return Err(e.into());
-            }
-        }
-
-        let mut data = vec![0; self.values().1 as usize];
-        // Read the stream into data, and return the result.
-        match stream.read(&mut data) {
-            Ok(_) => {
-                match std::str::from_utf8(&data) {
-                    Ok(v) => {
-                        return Ok(v.to_string());
-                    }
-                    Err(e) => {
-                        println!("Invalid UTF-8 sequence: {}", e);
-                        return Err(e.into());
-                    }
-                }
-            }
-            Err(e) => {
-                println!("Failed to receive data: {}", e);
-                Err(e.into())
-            }
-        }
-    }
-
-    fn build_cmd(&self, cmd_data: Option<String>) -> String {
-        let mut cmd_str = START_BYTES.to_ascii_lowercase();
+        //Get our own value as stated by the 
+        cmd_bytes.extend_from_slice(&self.to_string().as_bytes()); //Convert M command number to string, then bytes, then add it to the command
 
         match cmd_data {
             Some(v) => {
-                cmd_str.push_str(&v);
+                cmd_bytes.push(0x20); //Space
+                cmd_bytes.extend_from_slice(v.as_bytes());
             }
             None => {}
         }
 
-        
+        cmd_bytes.extend_from_slice(&END_BYTES);
+
+        return cmd_bytes;
+    }
 
 
-        return cmd_str;
+    fn send(&self, stream: &mut TcpStream, cmd: Vec<u8>) -> Option<String> {
+        let write_res = stream.write(&cmd);
+
+        match write_res {
+            Ok(_) => {}
+            Err(e) => {
+                println!("Failed to send command: {}", e);
+                return None;
+            }
+        }
+
+        let mut read_res = vec![0; 1460];
+        match stream.read_to_end(&mut read_res) {
+            Ok(_) => {
+                println!("Response: {:?}", read_res);
+            }
+            Err(e) => {
+                println!("Failed to read response: {}", e);
+                return None;
+            }
+        }
+
+        match String::from_utf8(read_res) {
+            Ok(res_str) => {
+                return Some(res_str);
+            }
+            Err(e) => {
+                println!("Failed to convert response to string: {}", e);
+                return None;
+            }
+        }
+    }
+
+    fn send_cmd(&self, stream: &mut TcpStream, cmd_data: Option<String>) -> Option<String> {
+        let cmd = self.build(cmd_data);
+        return self.send(stream, cmd);
     }
 }
+
+
 
 
 fn main() {
     let mut stream = TcpStream::connect("192.168.1.10:8899").unwrap();
 
-    let cmd = PrinterCommand::GainControl;
-    let response = cmd.send_cmd(&mut stream, Some(" S1".as_bytes().to_vec())).unwrap();
-    println!("GAIN_CONTROL (601) Response: {}", response);
+    println!("Connected to printer.");
 
-    //Write the contents of the chosen file to the stream.
-    let file_path = r"C:\Users\Gabe\Documents\";
-    let file_name = "Rocktopus.gcode";
-    let mut file = std::fs::File::open(format!("{}{}", file_path, file_name)).unwrap();
+    let response = PrinterCommand::MachineStatus.send_cmd(&mut stream, None);
 
-    // Get the size of the chosen file
-    let metadata = std::fs::metadata(format!("{}{}", file_path, file_name)).unwrap();
-    let file_size = metadata.len();
+    println!("Got a response");
 
-    let file_data_str = format!(" {} 0:/user/{}", file_size.to_string(), file_name);
+    match response {
+        Some(v) => {
+            println!("Machine Status (119) Response: {}", v);
+        }
+        None => {
+            println!("Failed to get response");
+        }
+    }
 
+    // let cmd = PrinterCommand::GainControl;
 
-    let cmd3 = PrinterCommand::SendFile;
-    let response3 = cmd3.send_cmd(&mut stream, Some(file_data_str.as_bytes().to_vec())).unwrap();
-    println!("SEND FILE (28) Response: {}", response3);
+    // let response = cmd.send_cmd(&mut stream, Some("S1")).unwrap();
+    // println!("GAIN_CONTROL (601) Response: {}", response);
 
+    // //Write the contents of the chosen file to the stream.
+    // let file_path = r"C:\Users\Gabe\Documents\";
+    // let file_name = "Rocktopus.gcode";
+    // let mut file = std::fs::File::open(format!("{}{}", file_path, file_name)).unwrap();
 
-    //Write the contents of the chosen file to the stream.
-    std::io::copy(&mut file, &mut stream).unwrap();
+    // // Get the size of the chosen file
+    // let metadata = std::fs::metadata(format!("{}{}", file_path, file_name)).unwrap();
+    // let file_size = metadata.len();
 
-    // std::thread::sleep(std::time::Duration::from_secs(1));
-
-    let response4 = PrinterCommand::SaveFile.send_cmd(&mut stream, None).unwrap();
-    println!("SAVE FILE (29) Response: {}", response4);
-
-
-    let mut file_name_bytes = vec![0x20];
-    file_name_bytes.extend_from_slice(&file_name.as_bytes());
-    let response5 = PrinterCommand::OpenFile.send_cmd(&mut stream, Some(file_name_bytes)).unwrap();
-    println!("OPEN FILE (23) Response: {}", response5);
+    // let file_data_str = format!(" {} 0:/user/{}", file_size.to_string(), file_name);
 
 
-    let cmd6 = PrinterCommand::Unknown2;
-    let response6 = cmd6.send_cmd(&mut stream, None).unwrap();
-    println!("UNKNOWN 2 (26) Response: {}", response6);
+    // let cmd3 = PrinterCommand::SendFile;
+    // let response3 = cmd3.send_cmd(&mut stream, Some(file_data_str.as_bytes().to_vec())).unwrap();
+    // println!("SEND FILE (28) Response: {}", response3);
 
 
-    let cmd7 = PrinterCommand::ReleaseControl;
-    let response7 = cmd7.send_cmd(&mut stream, None).unwrap();
-    println!("RELEASE CONTROL (602) Response: {}", response7);
+    // //Write the contents of the chosen file to the stream.
+    // std::io::copy(&mut file, &mut stream).unwrap();
+
+    // // std::thread::sleep(std::time::Duration::from_secs(1));
+
+    // let response4 = PrinterCommand::SaveFile.send_cmd(&mut stream, None).unwrap();
+    // println!("SAVE FILE (29) Response: {}", response4);
+
+
+    // let mut file_name_bytes = vec![0x20];
+    // file_name_bytes.extend_from_slice(&file_name.as_bytes());
+    // let response5 = PrinterCommand::OpenFile.send_cmd(&mut stream, Some(file_name_bytes)).unwrap();
+    // println!("OPEN FILE (23) Response: {}", response5);
+
+
+    // let cmd6 = PrinterCommand::Unknown2;
+    // let response6 = cmd6.send_cmd(&mut stream, None).unwrap();
+    // println!("UNKNOWN 2 (26) Response: {}", response6);
+
+
+    // let cmd7 = PrinterCommand::ReleaseControl;
+    // let response7 = cmd7.send_cmd(&mut stream, None).unwrap();
+    // println!("RELEASE CONTROL (602) Response: {}", response7);
 
 
 
